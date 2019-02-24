@@ -79,54 +79,87 @@ for (iLevel in seq(nLevels)){
 }
 
 # ExtractMeanStd -----
-# There is only 1 file having 561 columns, need to extract from it the relevant columns 
-fileRef   <- paste0(dpMerge[1],"X_merge.txt")
-fileMeanStd <- paste0(dpMerge[1],"X_MeanStd.txt")
-
-# Load reference data set of 561 columns
-dtRef <- fread(fileRef)
+# Load the X data set of 561 columns
+fileDataX   <- paste0(dpMerge[1],"X_merge.txt")
+dtDataX <- fread(fileDataX)
 
 # Read the features.txt
 dpHead <- "./data/UCI HAR Dataset/"
 fileFeatures <- paste0(dpHead,"features.txt")
 dtFeatures <- fread(fileFeatures)
 
-# check for mean() and std(), but not meanFreq
+# set filter for mean() and std(), but not meanFreq
 fMeanStd <- lapply(dtFeatures[,2], function (x) grepl("mean[(][)]", x) | grepl("std[(][)]", x))
 fMeanStd <- unlist(fMeanStd[[1]]) # convert as a basic logical vector
+
+# filter for these flaged cases from X data file
+dtMeanStd <- dtDataX[, ..fMeanStd]
+
+# get and clean feature names
 dtName   <- dtFeatures[fMeanStd,2] # get the field value as name
 dtName   <- dtName$V2   # turn into a simple vector
 
-# filter for these flaged cases
-dtMeanStd <- dtRef[, ..fMeanStd]
 dtName <- gsub("[()]", "", dtName) # rm ()
 dtName <- gsub("BodyBody", "", dtName) # fix typo in Name (BodyBody -> Body)
-colnames(dtMeanStd) <- dtName
-fwrite(dtMeanStd, file = fileMeanStd)
+
+dtNameSplit <- strsplit(dtName,"-")
+
+featureName <- gsub("Mag","",lapply(dtNameSplit, `[[`, 1))
+featureStat <- unlist(lapply(dtNameSplit, `[[`, 2))
+featureSpec <- unlist(lapply(dtNameSplit, function (x) ifelse(length(x) == 3, x[[3]], "mag")))
+
+# rename columns of the filtered data set
+colnames(dtMeanStd) <- paste0(featureName, "_", featureSpec, "_", featureStat) 
+
+
+# Load the activity data label (y)
+fileActivity   <- paste0(dpMerge[1],"y_merge.txt")
+dtActivity <- fread(fileActivity)
+colnames(dtActivity) <- "IDactivity"
+
+# Read the activity_labels.txt
+dpHead <- "./data/UCI HAR Dataset/"
+fileActivityLabels <- paste0(dpHead,"activity_labels.txt")
+dtActivityLabels <- fread(fileActivityLabels)
+colnames(dtActivityLabels) <- c("IDactivity","activity")
+
+# replace index in activity
+replaceIndex <- function(x) unlist(dtActivityLabels[x,activity])
+dtActivity <- dtActivity[, activity:= replaceIndex(IDactivity)]
+
+# Load the subject label
+fileSubject   <- paste0(dpMerge[1],"subject_merge.txt")
+dtSubject <- fread(fileSubject)
+colnames(dtSubject) <- "subject"
+
+# combine data set
+dtDataSet <- cbind(dtSubject,dtActivity[,.(activity)],dtMeanStd)
+
+# save data set
+fileMeanStd <- paste0(dpMerge[1],"DataSet_MeanStd.txt")
+fwrite(dtDataSet, file = fileMeanStd)
 
 # GetAvgTidy -----
 
-# get list of signal name and nature
-dtNameSplit <- strsplit(dtName,"-")
+# melt the data table based on subject and activity
+dtDataSet0 <- melt(dtDataSet, id.vars = c("subject", "activity"), measure.vars = .SD)
+dtDataSet0 <- dtDataSet0[,variable:=as.character(variable)] # convert factor into character
 
-signalName <- gsub("Mag","",lapply(dtNameSplit, `[[`, 1))
-signalNature <- unlist(lapply(dtNameSplit, 
-                              function (x) ifelse(length(x) == 3, 
-                                                  paste0(x[[2]],"-",x[[3]]), 
-                                                  paste0(x[[2]],"-mag"))))
+# split complex variable name into different columns
+dtDataSet0 <- dtDataSet0[, feature:=as.character(lapply(strsplit(variable,"_"), `[[`, 1))]
+dtDataSet0 <- dtDataSet0[, component:=as.character(lapply(strsplit(variable,"_"), `[[`, 2))]
+dtDataSet0 <- dtDataSet0[, stat:=as.character(lapply(strsplit(variable,"_"), `[[`, 3))]
 
-# rename columns
-colnames(dtMeanStd) <- paste0(signalName, "_", signalNature) 
+# remove dummy column variable
+dtDataSet0 <- dtDataSet0[,variable:=NULL]
 
-# prepare long table
-dtAvgLong <- data.table(matrix(NA, nrow = length(dtMeanStd), ncol = 3))
-colnames(dtAvgLong) <- c("signal", "signalNature", "average") 
-dtAvgLong$average <- unlist(dtMeanStd[, lapply(.SD,mean)])
-dtAvgLong$signal <- unlist(lapply(strsplit(names(dtMeanStd),"_"), `[[`, 1))
-dtAvgLong$signalNature <- unlist(lapply(strsplit(names(dtMeanStd),"_"), `[[`, 2))
+# get average 
+dtAvg <- dtDataSet0[, mean(value), by=.(subject, activity, feature, component, stat)]
+names(dtAvg)[names(dtAvg) == "V1"] = "average"
 
-# cast into normal table
-dtAvg <- dcast(dtAvgLong, signal ~ signalNature, value.var = "average")
+# cast into final table
+dtTidyDataSet <- dcast(dtAvg, subject + activity + feature + component ~ stat, value.var = "average")
+dtTidyDataSet
 
 # save tidy data set
-write.table(dtAvg, file = "DataSetAvg.txt" , row.names = FALSE)
+write.table(dtTidyDataSet, file = "DataSetAvg.txt" , row.names = FALSE)
