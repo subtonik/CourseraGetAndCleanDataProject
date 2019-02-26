@@ -22,7 +22,7 @@ The following actions are done to prepare the target data file:
 7) The subject, activity and mean-std data are combined into one single file.
 8) The file is then melted based on *subject* and *activity*
 9) The complex name actually contains the signal feature, its component and the statistics of that component. They are separated in the melted file.
-10) The __averages__ of each signal feature per component, statistics and statistics grouped by subject and activity are determined.
+10) The __averages__ of each signal feature, per component and statistics, grouped by subject and activity are determined.
 11) Lastly, this new format is saved in the output file DataSetAvg.txt
 
 ## Variable description
